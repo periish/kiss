@@ -1,8 +1,8 @@
 #!/bin/sh
 # Read KISS documentation
 
-cd "$KISS_ROOT/usr/share/doc/kiss" 2>/dev/null || {
-    printf 'Documentation is missing from /usr/share/doc/kiss\n'
+cd "$KISS_ROOT/pkg/kiss/doc/kiss" 2>/dev/null || {
+    printf 'Documentation is missing from /pkg/kiss/doc/kiss\n'
     exit 1
 }
 

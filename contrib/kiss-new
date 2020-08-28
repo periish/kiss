@@ -11,7 +11,7 @@ log() {
 }
 
 [ "$1" ]      || die "usage: kiss-new [name] [version] [source]"
-[ -d "$1" ]   && die "error: Package $1 already exists"
+[ ! -d "$1" ] || die "error: Package $1 already exists"
 mkdir -p "$1" || die "error: Couldn't create directory in $PWD"
 cd "$1"       || die "error: Couldn't enter directory $1/"
 

@@ -38,7 +38,7 @@ mounted() {
     return 1
 }
 
-[ -z "$1" ]        && die Need a path to the chroot
+[ -n "$1" ]        || die Need a path to the chroot
 [ -d "$1" ]        || die Given path does not exist
 [ "$(id -u)" = 0 ] || die Script needs to be run as root
 

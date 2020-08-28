@@ -1,0 +1,95 @@
+#!/bin/sh
+# Macros to help packagers.
+
+# KISS macros!
+# Makes the annoying stuff considerably less annoying.
+
+# Will only handle autoconf / configure / cmake / meson, for now.
+
+# This will require changes to your package manager, to make PKG_NAME available in the environment.
+
+setup() {
+  : "${PKG_NAME:?error: PKG_NAME not in environment}"
+  pkg_dir=/pkg/"$PKG_NAME"
+}
+
+configure () {
+    "${CONFIGURE_PATH:-./configure}" \
+        --prefix="$pkg_dir" \
+        --bindir="$pkg_dir"/exec \
+        --sbindir="$pkg_dir"/exec \
+        --libexecdir="$pkg_dir"/lib \
+        --sysconfdir=/conf \
+        --sharedstatedir=/com \
+        --localstatedir=/bulk \
+        --libdir="$pkg_dir"/lib \
+        --includedir="$pkg_dir"/inc \
+        --oldincludedir="$pkg_dir"/inc \
+        --datarootdir="$pkg_dir" \
+        --datadir="$pkg_dir"/data \
+        --infodir="$pkg_dir"/info \
+        --mandir="$pkg_dir"/man \
+        "$@"
+}
+
+_cmake () {
+    cmake -B build \
+        -DCMAKE_INSTALL_PREFIX="$pkg_dir" \
+        -DCMAKE_INSTALL_BINDIR="$pkg_dir"/exec \
+        -DCMAKE_INSTALL_SBINDIR="$pkg_dir"/exec \
+        -DCMAKE_INSTALL_SYSCONFDIR=/conf \
+        -DCMAKE_INSTALL_SHAREDSTATEDIR=/com \
+        -DCMAKE_INSTALL_LOCALSTATEDIR=/bulk \
+        -DCMAKE_INSTALL_LIBDIR="$pkg_dir"/lib \
+        -DCMAKE_INSTALL_INCLUDEDIR="$pkg_dir"/inc \
+        -DCMAKE_INSTALL_OLDINCLUDEDIR="$pkg_dir"/inc \
+        -DCMAKE_INSTALL_DATAROOTDIR="$pkg_dir" \
+        -DCMAKE_INSTALL_DATADIR="$pkg_dir"/data \
+        -DCMAKE_INSTALL_INFODIR="$pkg_dir"/info \
+        -DCMAKE_INSTALL_MANDIR="$pkg_dir"/man \
+        -DCMAKE_BUILD_TYPE=Release \
+        "$@"
+}
+
+_meson () {
+    meson \
+        --prefix="$pkg_dir" \
+        --bindir="$pkg_dir"/exec \
+        --sbindir="$pkg_dir"/exec \
+        --libexecdir="$pkg_dir"/lib \
+        --sysconfdir=/conf \
+        --sharedstatedir=/com \
+        --localstatedir=/bulk \
+        --libdir="$pkg_dir"/lib \
+        --includedir="$pkg_dir"/inc \
+        --oldincludedir="$pkg_dir"/inc \
+        --datarootdir="$pkg_dir" \
+        --datadir="$pkg_dir"/data \
+        --infodir="$pkg_dir"/info \
+        --mandir="$pkg_dir"/man \
+        "$@"
+}
+
+usage () {
+cat << EOF
+usage: kiss-macros [macro]
+kiss-macros requires the PKG_NAME environment variable to be set when in use.
+kiss-macros has macros for configure, meson and cmake available.
+EOF
+exit "${1:-0}"
+}
+
+main () {
+    opt=$1
+    shift 1
+    setup
+    case $opt in
+        configure) configure "$@" ;;
+        cmake) _cmake "$@" ;;
+        meson) _meson "$@" ;;
+        help) usage ;;
+        *) usage 1  ;;
+    esac
+}
+
+main "$@"

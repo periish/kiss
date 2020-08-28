@@ -10,7 +10,7 @@
 
 # 'cd' to the database directory as a simple way of
 # stripping the path and performing a 'basename'.
-cd "$KISS_ROOT/var/db/kiss/installed"
+cd "$KISS_ROOT/pkg/db"
 
 # Use a simple 'grep' to display packages depending on '$1'.
 grep "^$1" -- */depends

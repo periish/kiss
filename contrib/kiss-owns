@@ -13,7 +13,7 @@ file=$(readlink -f "$KISS_ROOT/${1##$KISS_ROOT}")
 # Print the full path to the manifest file which contains
 # the match to our search.
 pkg_owns=$(grep -lFx "${file##$KISS_ROOT}" \
-                     "$KISS_ROOT/var/db/kiss/installed/"*/manifest)
+                     "$KISS_ROOT/pkg/db/"*/manifest)
 
 
 # Extract the package name from the path above.

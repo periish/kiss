@@ -9,7 +9,7 @@
 }
 
 # Grab the package's version..
-read -r ver rel 2>/dev/null < "$KISS_ROOT/var/db/kiss/installed/$1/version"
+read -r ver rel 2>/dev/null < "$KISS_ROOT/pkg/db/$1/version"
 
 # Reset the argument list.
 pkg=$1 pwd=$PWD
@@ -18,7 +18,7 @@ set --
 # Construct the argument list using each file.
 while read -r file; do
     [ -d "$KISS_ROOT/$file" ] || set -- "$@" ".$file"
-done < "$KISS_ROOT/var/db/kiss/installed/$pkg/manifest"
+done < "$KISS_ROOT/pkg/db/$pkg/manifest"
 
 cd "$KISS_ROOT/"
 

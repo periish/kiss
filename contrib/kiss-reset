@@ -3,7 +3,7 @@
 
 set --
 
-for pkg in "$KISS_ROOT/var/db/kiss/installed/"*; do
+for pkg in "$KISS_ROOT/pkg/db/"*; do
     pkg=${pkg##*/}
 
     case $pkg in

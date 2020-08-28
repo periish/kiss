@@ -24,7 +24,7 @@ get_size() {
 
 # Filter directories from manifest and leave only files.
 # Directories in the manifest end in a trailing '/'.
-files=$(sed 's|.*/$||' "$KISS_ROOT/var/db/kiss/installed/$1/manifest")
+files=$(sed 's|.*/$||' "$KISS_ROOT/pkg/db/$1/manifest")
 
 # Send the file list to 'du'.
 # This unquoted variable is safe as word splitting is intended

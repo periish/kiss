@@ -8,4 +8,4 @@
     exit 1
 }
 
-cat "$KISS_ROOT/var/db/kiss/installed/$1/depends" 2>/dev/null
+cat "$KISS_ROOT/pkg/db/$1/depends" 2>/dev/null
