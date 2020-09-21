@@ -80,8 +80,8 @@ run_hook() {
     # their own hook to override this behavior.
     [ "${KISS_HOOK:-}" ] || {
         case $1 in post-build)
-            rm -rf "$3/usr/share/gettext" "$3/usr/share/polkit-1" \
-                   "$3/usr/share/locale"  "$3/usr/share/info"
+            rm -rf "$3/pkg/$2/gettext" "$3/pkg/$2/polkit-1" \
+                   "$3/pkg/$2/locale"  "$3/pkg/$2/info"
         esac
 
         return 0
@@ -524,13 +524,13 @@ pkg_etcsums() (
 
     # This function runs as a sub-shell to avoid having to 'cd' back to the
     # prior directory before being able to continue.
-    [ -d "$pkg_dir/$1/etc" ] || return 0
+    [ -d "$pkg_dir/$1/conf" ] || return 0
 
     cd "$pkg_dir/$1"
 
     # This can't be a simple 'find -exec' as 'sh256' is a shell function
     # and not a real command of any kind. This is the shell equivalent.
-    find etc ! -type d | sort | while read -r line; do
+    find conf ! -type d | sort | while read -r line; do
         sh256 "$line"
     done > "$pkg_dir/$1/$pkg_db/$1/etcsums"
 )
@@ -638,7 +638,10 @@ pkg_build() {
         # Call the build script, log the output to the terminal and to a file.
         # There's no PIPEFAIL in POSIX shelll so we must resort to tricks like
         # killing the script ourselves.
-        { "$repo_dir/build" "$pkg_dir/$pkg" "$build_version" 2>&1 || {
+        # The name of the package is available as $3, and PKG_NAME.
+        export PKG_NAME="$pkg"
+
+        { "$repo_dir/build" "$pkg_dir/$pkg" "$build_version" "$pkg" 2>&1 || {
             log "$pkg" "Build failed"
             log "$pkg" "Log stored to $log_dir/$pkg-$time-$pid"
             run_hook build-fail "$pkg" "$pkg_dir/$pkg"
@@ -660,19 +663,19 @@ pkg_build() {
         # Remove all .la files from the packages. They're unneeded and cause
         # issues when a package stops providing one. This recently caused an
         # issue with harfbuzz (See: 05096e5a4dc6db5d202342f538d067d87ae7135e).
-        find "$pkg_dir/$pkg/usr/lib" -name \*.la -exec rm -f {} + 2>/dev/null ||:
+        find "$pkg_dir/$pkg/pkg/$pkg/lib" -name \*.la -exec rm -f {} + 2>/dev/null ||:
 
         # Remove this unneeded file from all packages as it is an endless
         # source of conflicts. This is used with info pages we we do not support.
-        rm -f "$pkg_dir/$pkg/usr/lib/charset.alias"
+        rm -f "$pkg_dir/$pkg/pkg/$pkg/lib/charset.alias"
 
         # Create the manifest file early and make it empty. This ensures that
         # the manifest is added to the manifest.
         : > "$pkg_dir/$pkg/$pkg_db/$pkg/manifest"
 
-        # If the package contains '/etc', add a file called 'etcsums' to the
+        # If the package contains '/conf', add a file called 'etcsums' to the
         # manifest. See comment directly above.
-        [ -d "$pkg_dir/$pkg/etc" ] && : > "$pkg_dir/$pkg/$pkg_db/$pkg/etcsums"
+        [ -d "$pkg_dir/$pkg/conf" ] && : > "$pkg_dir/$pkg/$pkg_db/$pkg/etcsums"
 
         pkg_strip    "$pkg"
         pkg_fixdeps  "$pkg"
@@ -759,169 +762,6 @@ pkg_verify() {
     log "Verified all checksums"
 }
 
-pkg_conflicts() {
-    # Check to see if a package conflicts with another.
-    log "$1" "Checking for package conflicts"
-
-    # Filter the tarball's manifest and select only files. Resolve all
-    # symlinks in file paths as well.
-    while read -r file; do file=$KISS_ROOT/${file#/}
-        # Skip all directories.
-        case $file in */) continue; esac
-
-        # Attempt to resolve symlinks by using 'cd'.
-        # If this fails, fallback to the file's parent
-        # directory.
-        cd -P "${file%/*}" 2>/dev/null || PWD=${file%/*}
-
-        # Print the file with all symlinks in its path
-        # resolved to their real locations.
-        printf '%s\n' "${PWD#"$KISS_ROOT"}/${file##*/}"
-    done < "$tar_dir/$1/$pkg_db/$1/manifest" > "$mak_dir/$pid-m"
-
-    p_name=$1
-    set +f
-    set -f "$sys_db"/*/manifest
-
-    # Generate a list of all installed package manifests and remove the
-    # current package from the list. This is the simplest method of
-    # dropping an item from the argument list. The one downside is that
-    # it cannot live in a function due to scoping of arguments.
-    for manifest do shift
-        [ "$sys_db/$p_name/manifest" = "$manifest" ] && continue
-
-        set -- "$@" "$manifest"
-    done
-
-    # Store the list of found conflicts in a file as we'll be using the
-    # information multiple times. Storing things in the cache dir allows
-    # us to be lazy as they'll be automatically removed on script end.
-    grep -Fxf "$mak_dir/$pid-m" -- "$@" 2>/dev/null > "$mak_dir/$pid-c" ||:
-
-    # Enable alternatives automatically if it is safe to do so.
-    # This checks to see that the package that is about to be installed
-    # doesn't overwrite anything it shouldn't in '/var/db/kiss/installed'.
-    grep -q ":/var/db/kiss/installed/" "$mak_dir/$pid-c" || choice_auto=1
-
-    if [ "$KISS_CHOICE" != 0  ] &&
-       [ "$choice_auto"  = 1  ] &&
-       [ -s "$mak_dir/$pid-c" ]; then
-        # This is a novel way of offering an "alternatives" system.
-        # It is entirely dynamic and all "choices" are created and
-        # destroyed on the fly.
-        #
-        # When a conflict is found between two packages, the file
-        # is moved to a directory called "choices" and its name
-        # changed to store its parent package and its intended
-        # location.
-        #
-        # The package's manifest is then updated to reflect this
-        # new location.
-        #
-        # The 'kiss choices' command parses this directory and
-        # offers you the CHOICE of *swapping* entries in this
-        # directory for those on the filesystem.
-        #
-        # The choices command does the same thing we do here,
-        # it rewrites manifests and moves files around to make
-        # this work.
-        #
-        # Pretty nifty huh?
-        while IFS=: read -r _ con; do
-            printf '%s\n' "Found conflict $con"
-
-            # Create the "choices" directory inside of the tarball.
-            # This directory will store the conflicting file.
-            mkdir -p "$tar_dir/$p_name/${cho_dir:=var/db/kiss/choices}"
-
-            # Construct the file name of the "db" entry of the
-            # conflicting file. (pkg_name>usr>bin>ls)
-            con_name=$(printf %s "$con" | sed 's|/|>|g')
-
-            # Move the conflicting file to the choices directory
-            # and name it according to the format above.
-            mv -f "$tar_dir/$p_name/$con" \
-                  "$tar_dir/$p_name/$cho_dir/$p_name$con_name" 2>/dev/null || {
-                log "File must be in ${con%/*} and not a symlink to it"
-                log "This usually occurs when a binary is installed to"
-                log "/sbin instead of /usr/bin (example)"
-                log "Before this package can be used as an alternative,"
-                log "this must be fixed in $p_name. Contact the maintainer"
-                die "by finding their details via 'kiss-maintainer'" "" "!>"
-            }
-        done < "$mak_dir/$pid-c"
-
-        log "$p_name" "Converted all conflicts to choices (kiss a)"
-
-        # Rewrite the package's manifest to update its location
-        # to its new spot (and name) in the choices directory.
-        pkg_manifest "$p_name" "$tar_dir" 2>/dev/null
-
-    elif [ -s "$mak_dir/$pid-c" ]; then
-        log "Package '$p_name' conflicts with another package" "" "!>"
-        log "Run 'KISS_CHOICE=1 kiss i $p_name' to add conflicts" "" "!>"
-        die "as alternatives." "" "!>"
-    fi
-}
-
-pkg_swap() {
-    # Swap between package alternatives.
-    pkg_list "$1" >/dev/null
-
-    alt=$(printf %s "$1$2" | sed 's|/|>|g')
-    cd "$sys_db/../choices"
-
-    [ -f "$alt" ] || [ -h "$alt" ] ||
-        die "Alternative '$1 $2' doesn't exist"
-
-    if [ -f "$2" ]; then
-        # Figure out which package owns the file we are going to swap for
-        # another package's. Print the full path to the manifest file which
-        # contains the match to our search.
-        pkg_owns=$(set +f; grep -lFx "$2" "$sys_db/"*/manifest) ||:
-
-        # Extract the package name from the path above.
-        pkg_owns=${pkg_owns%/*}
-        pkg_owns=${pkg_owns##*/}
-
-        # Ensure that the file we're going to swap is actually owned by a
-        # package. If it is not, we have to die here.
-        [ "$pkg_owns" ] || die "File '$2' exists on filesystem but isn't owned"
-
-        log "Swapping '$2' from '$pkg_owns' to '$1'"
-
-        # Convert the current owner to an alternative and rewrite its manifest
-        # file to reflect this.
-        cp -Pf "$KISS_ROOT/$2" "$pkg_owns>${alt#*>}"
-
-        # Replace the matching line in the manifest with the desired replacement.
-        # This used to be a 'sed' call which turned out to be a little
-        # error-prone in some cases. This new method is a tad slower but ensures
-        # we never wipe the file due to a command error.
-        while read -r line; do case $line in
-            "$2") printf '%s\n' "${PWD#"$KISS_ROOT"}/$pkg_owns>${alt#*>}" ;;
-               *) printf '%s\n' "$line" ;;
-        esac; done < "../installed/$pkg_owns/manifest" | sort -r > "$mak_dir/.$1"
-
-        mv -f "$mak_dir/.$1" "../installed/$pkg_owns/manifest"
-    fi
-
-    # Convert the desired alternative to a real file and rewrite the manifest
-    # file to reflect this. The reverse of above.
-    mv -f "$alt" "$KISS_ROOT/$2"
-
-    # Replace the matching line in the manifest with the desired replacement.
-    # This used to be a 'sed' call which turned out to be a little error-prone
-    # in some cases. This new method is a tad slower but ensures we never wipe
-    # the file due to a command error.
-    while read -r line; do case $line in
-        "${PWD#"$KISS_ROOT"}/$alt") printf '%s\n' "$2" ;;
-                                 *) printf '%s\n' "$line" ;;
-    esac; done < "../installed/$1/manifest" | sort -r > "$mak_dir/.$1"
-
-    mv -f "$mak_dir/.$1" "../installed/$1/manifest"
-}
-
 pkg_install_files() {
     # Reverse the manifest file so that we start shallow and go deeper as we
     # iterate over each item. This is needed so that directories are created
@@ -951,7 +791,7 @@ pkg_install_files() {
         #
         # The 'test' will run with '-e' for no-overwrite and '-z'
         # for overwrite.
-        case $line in /etc/*) ;;
+        case $line in /conf/*) ;;
             */)
                 # Skip directories if they already exist in the file system.
                 # (Think /usr/bin, /usr/lib, etc).
@@ -978,7 +818,7 @@ pkg_remove_files() {
     # installation and package removal. Combining the removals in these two
     # functions allows us to stop duplicating code.
     while read -r file; do
-        case $file in /etc/*)
+        case $file in /conf/*)
             printf 'Skipping removal of %s\n' "$file"
             continue;
         esac
@@ -1001,15 +841,15 @@ pkg_remove_files() {
 }
 
 pkg_etc() (
-    [ -d "$tar_dir/$pkg_name/etc" ] || return 0
+    [ -d "$tar_dir/$pkg_name/conf" ] || return 0
 
     # Create all directories beforehand.
     cd "$KISS_ROOT/"
-    find etc -type d -exec mkdir -p {} +
+    find conf -type d -exec mkdir -p {} +
     cd "$tar_dir/$pkg_name"
 
     # Handle files in /etc/ based on a 3-way checksum check.
-    find etc ! -type d | sort | while read -r file; do
+    find conf ! -type d | sort | while read -r file; do
         i=$((i + 1))
 
         { sum_new=$(sh256 "$file")
@@ -1164,7 +1004,6 @@ pkg_install() {
     }
 
     run_hook pre-install "$pkg_name" "$tar_dir/$pkg_name"
-    pkg_conflicts "$pkg_name"
 
     log "$pkg_name" "Installing package"
 
@@ -1242,77 +1081,19 @@ pkg_updates() {
         # Go to the root of the repository (if it exists).
         cd "$repo"
 
-        case $(git remote 2>/dev/null) in
-            "")
-                log "$repo" " "
-                printf 'Skipping git pull, not a repository\n'
-            ;;
+        # We've disabled submodule and overall git mess in favour of an update hook.
+        # Simple, but requires more trust/investigation of a repository.
+        # I do not think this is a bad thing.
 
-            *)
-                # Go to the repository's root directory.
-                cd "$(git rev-parse --show-toplevel)"
-
-                # Go to the real root directory if this is a submodule.
-                git_root=$(git rev-parse --show-superproject-working-tree)
-                cd "${git_root:-"$PWD"}"
-
-                contains "$repos" "$PWD" || {
-                    repos="$repos $PWD "
-
-                    # Display a tick if signing is enabled for this repository.
-                    case $(git config merge.verifySignatures) in
-                        true) log "$PWD" "[signed] " ;;
-                        *)    log "$PWD" " " ;;
-                    esac
-
-                    if [ -w "$PWD" ] && [ "$uid" != 0 ]; then
-                        git pull
-                        git submodule update --remote --init -f
-
-                    else
-                        [ "$uid" = 0 ] || log "$PWD" "Need root to update"
-
-                        # Find out the owner of the repository and spawn
-                        # git as this user below.
-                        #
-                        # This prevents 'git' from changing the original
-                        # ownership of files and directories in the rare
-                        # case that the repository is owned by a 3rd user.
-                        (
-                            file_owner "$PWD"
-
-                            # We're in a repository which is owned by a 3rd
-                            # user. Not root or the current user.
-                            [ "$user" = root ] ||
-                                log "Dropping to $user for pull"
-
-                            # Nesting is deep and line is long.
-                            git_cmd="
-                        git pull && git submodule update --remote --init -f
-                            "
-
-                            # 'sudo' and 'doas' properly parse command-line
-                            # arguments and split them in the common way. 'su'
-                            # on the other hand requires that each argument be
-                            # properly quoted as the command passed to it must
-                            # be a string... This sets quotes where needed.
-                            case $su in *su) git_cmd="'$git_cmd'"; esac
-
-                            # Spawn a subshell to run multiple commands as
-                            # root at once. This makes things easier on users
-                            # who aren't using persist/timestamps for auth
-                            # caching.
-                            user=$user as_root sh -c "$git_cmd"
-                        )
-                    fi
-                }
-            ;;
-        esac
-
-        [ ! -x update ] || {
+        if [ -x ./update ]; then
             log "$PWD" "Running update hook"
-            ./update
-        }
+            file_owner "$PWD"
+
+            user=$user as_root ./update
+        else
+            log "$repo" " "
+            printf 'Skipping update hook, not present\n'
+        fi
     done
 
     log "Checking for new package versions"
@@ -1398,7 +1179,7 @@ args() {
 
     # Rerun the script as root with a fixed environment if needed. We sadly
     # can't run singular functions as root so this is needed.
-    case $action in a|alternatives|i|install|r|remove)
+    case $action in i|install|r|remove)
         [ -z "$1" ] || [ -w "$KISS_ROOT/" ] || [ "$uid" = 0 ] || {
             as_root HOME="$HOME" \
                     XDG_CACHE_HOME="$XDG_CACHE_HOME" \
@@ -1418,23 +1199,6 @@ args() {
     # Actions can be abbreviated to their first letter. This saves keystrokes
     # once you memorize the commands.
     case $action in
-        a|alternatives)
-            if [ "$1" = - ]; then
-                while read -r pkg path; do
-                    pkg_swap "$pkg" "$path"
-                done
-
-            elif [ "$1" ]; then
-                pkg_swap "$@"
-
-            else
-                # Go over each alternative and format the file
-                # name for listing. (pkg_name>usr>bin>ls)
-                set +f; for pkg in "$sys_db/../choices"/*; do
-                    printf '%s\n' "${pkg##*/}"
-                done | sed 's|>| /|; s|>|/|g; /\*/d'
-            fi
-        ;;
 
         c|checksum)
             for pkg do pkg_lint    "$pkg" c; done
@@ -1483,8 +1247,7 @@ args() {
         v|version)  printf '4.1.3\n' ;;
 
         -h|--help|'')
-            log 'kiss [a|b|c|d|i|l|r|s|u|v] [pkg]...'
-            log 'alternatives List and swap to alternatives'
+            log 'kiss [b|c|d|i|l|r|s|u|v] [pkg]...'
             log 'build        Build a package'
             log 'checksum     Generate checksums'
             log 'download     Pre-download all sources'
@@ -1576,7 +1339,7 @@ main() {
     KISS_ROOT=${KISS_ROOT%/} KISS_ROOT=${KISS_ROOT%/} KISS_ROOT=${KISS_ROOT%/}
 
     # Define some paths which we will then use throughout the script.
-    sys_db=$KISS_ROOT/${pkg_db:=var/db/kiss/installed}
+    sys_db=$KISS_ROOT/${pkg_db:=pkg/db}
 
     # This allows for automatic setup of a KISS chroot and will
     # do nothing on a normal system.

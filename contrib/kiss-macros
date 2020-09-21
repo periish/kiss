@@ -33,7 +33,7 @@ configure () {
 }
 
 _cmake () {
-    cmake -B build \
+    cmake ${CMAKE_DIRECTIVE:-B build} \
         -DCMAKE_INSTALL_PREFIX="$pkg_dir" \
         -DCMAKE_INSTALL_BINDIR="$pkg_dir"/exec \
         -DCMAKE_INSTALL_SBINDIR="$pkg_dir"/exec \
@@ -62,8 +62,6 @@ _meson () {
         --localstatedir=/bulk \
         --libdir="$pkg_dir"/lib \
         --includedir="$pkg_dir"/inc \
-        --oldincludedir="$pkg_dir"/inc \
-        --datarootdir="$pkg_dir" \
         --datadir="$pkg_dir"/data \
         --infodir="$pkg_dir"/info \
         --mandir="$pkg_dir"/man \
